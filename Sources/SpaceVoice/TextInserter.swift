@@ -7,6 +7,8 @@ enum TextInserter {
     /// Up to `count` characters right before the caret in the focused field, if the app exposes them.
     static func textBeforeCaret(count: Int) -> String? {
         let system = AXUIElementCreateSystemWide()
+        // A hung app must not freeze dictation.
+        AXUIElementSetMessagingTimeout(system, 0.3)
         if let app = NSWorkspace.shared.frontmostApplication {
             // Chromium and Electron build their accessibility tree only when asked.
             let element = AXUIElementCreateApplication(app.processIdentifier)

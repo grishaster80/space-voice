@@ -6,10 +6,6 @@ import Foundation
 protocol SpaceGestureDelegate: AnyObject {
     /// Whether a second press may turn into dictation here (enabled, app not excluded).
     func spaceGestureShouldBegin() -> Bool
-    /// The second press is down; warm up the microphone in case it is held.
-    func spaceGestureDidStartHolding()
-    /// The second press was released too soon: it was just a space.
-    func spaceGestureDidCancelHolding()
     /// The second press has been held long enough: dictation is on.
     func spaceGestureDidBeginRecording()
     /// Space was released: stop and insert the transcript.
@@ -88,7 +84,7 @@ final class SpaceGesture {
         let pass = Unmanaged.passUnretained(event)
         if key == Keyboard.escape, case .recording = state {
             state = .idle
-            delegate?.spaceGestureDidCancelRecording()
+            notify { $0.spaceGestureDidCancelRecording() }
             return nil
         }
         guard key == Keyboard.space, isPlain(event) else {
@@ -104,7 +100,6 @@ final class SpaceGesture {
             let work = DispatchWorkItem { [weak self] in self?.holdElapsed() }
             state = .holding(work)
             DispatchQueue.main.asyncAfter(deadline: .now() + holdDelay, execute: work)
-            delegate?.spaceGestureDidStartHolding()
             return nil
         }
         firstDownAt = now
@@ -118,12 +113,11 @@ final class SpaceGesture {
             // Released too soon: it was just a second space.
             work.cancel()
             state = .idle
-            delegate?.spaceGestureDidCancelHolding()
             Keyboard.press(Keyboard.space)
             return nil
         case .recording:
             state = .idle
-            delegate?.spaceGestureDidEndRecording()
+            notify { $0.spaceGestureDidEndRecording() }
             return nil
         case .idle:
             if isPlain(event), let firstDownAt, now - firstDownAt <= maxTapDuration {
@@ -140,6 +134,14 @@ final class SpaceGesture {
         guard case .holding = state else { return }
         state = .recording
         delegate?.spaceGestureDidBeginRecording()
+    }
+
+    /// Tells the delegate after the tap callback returns: a slow callback delays
+    /// every key press, and macOS disables taps that take too long.
+    private func notify(_ body: @escaping (SpaceGestureDelegate) -> Void) {
+        DispatchQueue.main.async { [weak self] in
+            if let delegate = self?.delegate { body(delegate) }
+        }
     }
 
     private func isPlain(_ event: CGEvent) -> Bool {

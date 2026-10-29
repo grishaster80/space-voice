@@ -50,20 +50,16 @@ final class DictationController: SpaceGestureDelegate {
         return !Settings.excludedApps.contains(app)
     }
 
-    func spaceGestureDidStartHolding() {
-        // Start the microphone now so the first words are not lost.
-        feed.reset()
-        try? recorder.start()
-    }
-
-    func spaceGestureDidCancelHolding() {
-        recorder.stop()
-        feed.reset()
-    }
-
     func spaceGestureDidBeginRecording() {
         generation += 1
         removeFirstTapSpace()
+        feed.reset()
+        do {
+            try recorder.start()
+        } catch {
+            hud.show(.failed(error.localizedDescription))
+            return
+        }
         guard recorder.isRunning else {
             hud.show(.failed(AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
                 ? "Не удалось включить микрофон"
@@ -96,8 +92,7 @@ final class DictationController: SpaceGestureDelegate {
                 let session = try await transcription.value
                 let text = try await session.finish(samples: samples)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-                guard current == generation else { return }
-                hud.hide()
+                if current == generation { hud.hide() }
                 if !text.isEmpty { TextInserter.insert(text) }
             } catch is CancellationError {
                 if current == generation { hud.hide() }

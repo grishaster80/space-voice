@@ -5,7 +5,6 @@ import SwiftUI
 @MainActor
 final class HUD {
     enum Phase: Equatable {
-        case preparing
         case listening
         case transcribing
         case failed(String)
@@ -38,7 +37,7 @@ final class HUD {
 
     func show(_ phase: Phase) {
         hideWork?.cancel()
-        if phase == .listening || phase == .preparing, model.phase != .listening {
+        if phase == .listening {
             model.text = ""
             model.level = 0
         }
@@ -95,7 +94,6 @@ private struct HUDView: View {
 
     private var label: String {
         switch model.phase {
-        case .preparing: return "Готовлю распознавание…"
         case .listening: return model.text.isEmpty ? "Говорите… отпустите пробел" : model.text
         case .transcribing: return model.text.isEmpty ? "Распознаю…" : model.text
         case .failed(let message): return message
@@ -111,7 +109,7 @@ private struct HUDView: View {
                 Image(systemName: "mic.fill").foregroundStyle(.white).font(.system(size: 13))
             }
             .frame(width: 26, height: 26)
-        case .preparing, .transcribing:
+        case .transcribing:
             ProgressView().controlSize(.small).tint(.white).frame(width: 26, height: 26)
         case .failed:
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
