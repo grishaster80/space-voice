@@ -2,7 +2,11 @@ import Foundation
 
 /// Which service turns the recording into text.
 enum Engine: String, CaseIterable {
-    /// `bb voice transcribe`: the voice service chosen in bb (Codex or bb cloud).
+    /// The claude.ai subscription Claude Code is signed in with (Claude Code's voice mode).
+    case claude
+    /// The ChatGPT subscription Codex is signed in with.
+    case codex
+    /// `bb voice transcribe`: the voice service chosen in bb.
     case bb
     /// OpenAI's transcription API with the user's own key.
     case openAI
@@ -11,8 +15,10 @@ enum Engine: String, CaseIterable {
 
     var title: String {
         switch self {
-        case .bb: return tr("bb (same as in bb)", "BB (как в BB)")
-        case .openAI: return "OpenAI"
+        case .claude: return "Claude"
+        case .codex: return "Codex (ChatGPT)"
+        case .bb: return "bb"
+        case .openAI: return tr("OpenAI API key", "Ключ OpenAI API")
         case .apple: return tr("Apple, on device", "Apple, на устройстве")
         }
     }
@@ -53,8 +59,8 @@ enum Settings {
         set { defaults.set(newValue?.rawValue, forKey: "engine") }
     }
 
-    /// Locale for Apple's on-device engine; the others detect the language.
-    static var appleLocale: String {
+    /// The language you dictate in. Claude and Apple need it; the others detect it.
+    static var dictationLocale: String {
         get { defaults.string(forKey: "appleLocale") ?? "ru-RU" }
         set { defaults.set(newValue, forKey: "appleLocale") }
     }

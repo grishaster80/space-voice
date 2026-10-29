@@ -62,6 +62,41 @@ final class BBTranscription: Transcription, @unchecked Sendable {
 
     static var isAvailable: Bool { location != nil }
 
+    private static let serviceLock = NSLock()
+    nonisolated(unsafe) private static var cachedVoiceService: String?
+
+    /// The service bb transcribes with ("Codex", "bb cloud"), as last read by `refreshVoiceService()`.
+    static var voiceService: String? { serviceLock.withLock { cachedVoiceService } }
+
+    /// Asks bb which voice service it uses. Runs a process: call off the main thread.
+    static func refreshVoiceService() {
+        let service = loadVoiceService()
+        serviceLock.withLock { cachedVoiceService = service }
+    }
+
+    private static func loadVoiceService() -> String? {
+        guard let location else { return nil }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: location.executable)
+        process.arguments = ["settings", "ai-services", "show"]
+        var environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("BB_") }
+        environment["PATH"] = location.path
+        process.environment = environment
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return nil }
+        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        process.waitUntilExit()
+        // "voice           Automatic (using Codex)" or "voice           Codex"
+        guard let line = output.split(separator: "\n").first(where: { $0.hasPrefix("voice ") }) else { return nil }
+        let value = line.dropFirst("voice".count).trimmingCharacters(in: .whitespaces)
+        if let range = value.range(of: "using "), value.hasSuffix(")") {
+            return String(value[range.upperBound...].dropLast())
+        }
+        return value.isEmpty ? nil : value
+    }
+
     private var process: Process?
 
     func append(_ buffer: AVAudioPCMBuffer) {}
@@ -270,5 +305,189 @@ final class AppleTranscription: Transcription, @unchecked Sendable {
             }
         }
         return error == nil ? output : nil
+    }
+}
+
+// MARK: - Codex
+
+/// Transcribes with the ChatGPT subscription Codex is signed in with, as bb's Codex provider does.
+final class CodexTranscription: Transcription, @unchecked Sendable {
+    private var task: Task<String, Error>?
+
+    func append(_ buffer: AVAudioPCMBuffer) {}
+
+    func finish(samples: [Float]) async throws -> String {
+        guard let account = CodexAccount.credentials() else {
+            throw TranscriptionError.unavailable(tr("Sign in to Codex first", "Сначала войдите в Codex"))
+        }
+        let task = Task {
+            let boundary = "SpaceVoice-\(UUID().uuidString)"
+            var request = URLRequest(url: URL(string: "https://chatgpt.com/backend-api/transcribe")!)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 60
+            request.setValue("Bearer \(account.accessToken)", forHTTPHeaderField: "Authorization")
+            request.setValue(account.accountID, forHTTPHeaderField: "chatgpt-account-id")
+            request.setValue("space_voice", forHTTPHeaderField: "originator")
+            request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+            var body = Data()
+            body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\ngpt-transcribe\r\n".utf8))
+            body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"speech.wav\"\r\nContent-Type: audio/wav\r\n\r\n".utf8))
+            body.append(Recorder.wav(samples))
+            body.append(Data("\r\n--\(boundary)--\r\n".utf8))
+            request.httpBody = body
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            struct Response: Decodable { let text: String }
+            switch status {
+            case 200:
+                return try JSONDecoder().decode(Response.self, from: data).text
+            case 401:
+                throw TranscriptionError.failed(tr(
+                    "Codex sign-in expired — open Codex once to renew it",
+                    "Вход в Codex истёк — откройте Codex, чтобы его обновить"
+                ))
+            default:
+                throw TranscriptionError.failed("Codex: HTTP \(status)")
+            }
+        }
+        self.task = task
+        return try await task.value
+    }
+
+    func cancel() {
+        task?.cancel()
+    }
+}
+
+// MARK: - Claude
+
+/// Streams to the speech-to-text service behind Claude Code's voice mode, with the
+/// claude.ai subscription Claude Code is signed in with. Words come back while you talk.
+final class ClaudeTranscription: Transcription, @unchecked Sendable {
+    /// After CloseStream: give up waiting for the last words after this long…
+    private let safetyTimeout: TimeInterval = 5
+    /// …or this long without any message.
+    private let noDataTimeout: TimeInterval = 1.5
+
+    private let socket: URLSessionWebSocketTask
+    private let onPartial: @Sendable (String) -> Void
+    private let lock = NSLock()
+    private var finals: [String] = []
+    private var interim = ""
+    private var serverError: String?
+    private var closing = false
+    private var done = false
+    private var lastMessageAt = Date()
+    private var keepAlive: Task<Void, Never>?
+
+    init(locale: Locale, onPartial: @escaping @Sendable (String) -> Void) throws {
+        guard let account = ClaudeAccount.credentials() else {
+            throw TranscriptionError.unavailable(tr("Sign in to Claude Code first", "Сначала войдите в Claude Code"))
+        }
+        guard !account.isExpired else {
+            throw TranscriptionError.unavailable(tr(
+                "Claude sign-in expired — open Claude Code once to renew it",
+                "Вход в Claude истёк — откройте Claude Code, чтобы его обновить"
+            ))
+        }
+        self.onPartial = onPartial
+        var components = URLComponents(string: "wss://api.anthropic.com/api/ws/speech_to_text/voice_stream")!
+        components.queryItems = [
+            "encoding": "linear16",
+            "sample_rate": String(Int(Recorder.format.sampleRate)),
+            "channels": "1",
+            "endpointing_ms": "300",
+            "utterance_end_ms": "1000",
+            "language": locale.language.languageCode?.identifier ?? "en",
+            "use_conversation_engine": "true",
+        ].map { URLQueryItem(name: $0.key, value: $0.value) }
+        var request = URLRequest(url: components.url!)
+        request.setValue("Bearer \(account.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("cli", forHTTPHeaderField: "x-app")
+        socket = URLSession.shared.webSocketTask(with: request)
+        socket.resume()
+        send(.string(#"{"type":"KeepAlive"}"#))
+        Task { await receive() }
+        keepAlive = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(8))
+                self?.send(.string(#"{"type":"KeepAlive"}"#))
+            }
+        }
+    }
+
+    func append(_ buffer: AVAudioPCMBuffer) {
+        guard let channel = buffer.floatChannelData?[0] else { return }
+        var pcm = Data(capacity: Int(buffer.frameLength) * 2)
+        for index in 0..<Int(buffer.frameLength) {
+            var value = Int16(max(-1, min(1, channel[index])) * Float(Int16.max)).littleEndian
+            withUnsafeBytes(of: &value) { pcm.append(contentsOf: $0) }
+        }
+        send(.data(pcm))
+    }
+
+    func finish(samples: [Float]) async throws -> String {
+        let closedAt = Date()
+        lock.withLock {
+            closing = true
+            lastMessageAt = closedAt
+        }
+        send(.string(#"{"type":"CloseStream"}"#))
+        while true {
+            let (finished, quietFor) = lock.withLock { (done, Date().timeIntervalSince(lastMessageAt)) }
+            if finished || Date().timeIntervalSince(closedAt) > safetyTimeout || quietFor > noDataTimeout { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        cancel()
+        let (text, error) = lock.withLock { ((finals + [interim]).filter { !$0.isEmpty }.joined(separator: " "), serverError) }
+        if text.isEmpty, let error { throw TranscriptionError.failed("Claude: \(error)") }
+        return text
+    }
+
+    func cancel() {
+        keepAlive?.cancel()
+        socket.cancel(with: .normalClosure, reason: nil)
+    }
+
+    private func send(_ message: URLSessionWebSocketTask.Message) {
+        socket.send(message) { _ in }
+    }
+
+    private func receive() async {
+        while true {
+            guard let message = try? await socket.receive() else {
+                lock.withLock {
+                    if serverError == nil, !closing {
+                        serverError = socket.closeReason.flatMap { String(data: $0, encoding: .utf8) }
+                            ?? tr("connection failed", "нет соединения")
+                    }
+                    done = true
+                }
+                return
+            }
+            guard case .string(let text) = message,
+                  let json = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any],
+                  let type = json["type"] as? String
+            else { continue }
+            let partial: String? = lock.withLock {
+                lastMessageAt = Date()
+                switch type {
+                case "TranscriptText", "TranscriptInterim":
+                    interim = json["data"] as? String ?? interim
+                case "TranscriptEndpoint":
+                    if !interim.isEmpty { finals.append(interim) }
+                    interim = ""
+                    if closing { done = true }
+                case "TranscriptError", "error":
+                    serverError = (json["description"] ?? json["message"] ?? json["error_code"]) as? String ?? type
+                    if closing { done = true }
+                default:
+                    return nil
+                }
+                return (finals + [interim]).filter { !$0.isEmpty }.joined(separator: " ")
+            }
+            if let partial { onPartial(partial) }
+        }
     }
 }

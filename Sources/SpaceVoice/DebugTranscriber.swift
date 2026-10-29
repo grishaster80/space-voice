@@ -24,12 +24,15 @@ enum DebugTranscriber {
         let samples = Array(UnsafeBufferPointer(start: buffer.floatChannelData![0], count: Int(buffer.frameLength)))
 
         let session: Transcription
+        let locale = Locale(identifier: Settings.dictationLocale)
         switch engine {
+        case .claude: session = try ClaudeTranscription(locale: locale) { _ in }
+        case .codex: session = CodexTranscription()
         case .bb: session = BBTranscription()
         case .openAI: session = OpenAITranscription()
         case .apple:
             guard #available(macOS 26.0, *) else { throw TranscriptionError.unavailable("macOS 26") }
-            session = try await AppleTranscription(locale: Locale(identifier: Settings.appleLocale)) { _ in }
+            session = try await AppleTranscription(locale: locale) { _ in }
         }
         session.append(buffer)
         let start = Date()

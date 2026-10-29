@@ -64,7 +64,9 @@ final class MainWindowModel: ObservableObject {
     @Published var accessibility = false
     @Published var microphone = AVCaptureDevice.authorizationStatus(for: .audio)
     @Published var enabled = Settings.enabled
-    @Published var engine = DictationController.currentEngine
+    @Published var engine = Engines.current
+    @Published var engines: [EngineStatus] = []
+    @Published var dictationLocale = Settings.dictationLocale
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
     @Published var hasOpenAIKey = Keychain.openAIKey != nil
     @Published var language = Settings.uiLanguage
@@ -77,7 +79,9 @@ final class MainWindowModel: ObservableObject {
         accessibility = AXIsProcessTrusted()
         microphone = AVCaptureDevice.authorizationStatus(for: .audio)
         enabled = Settings.enabled
-        engine = DictationController.currentEngine
+        engine = Engines.current
+        engines = Engines.detect()
+        dictationLocale = Settings.dictationLocale
         launchAtLogin = SMAppService.mainApp.status == .enabled
         hasOpenAIKey = Keychain.openAIKey != nil
         language = Settings.uiLanguage
@@ -86,6 +90,11 @@ final class MainWindowModel: ObservableObject {
     }
 
     func startRefreshing() {
+        // bb's voice service comes from running bb: read it in the background.
+        DispatchQueue.global(qos: .userInitiated).async {
+            BBTranscription.refreshVoiceService()
+            DispatchQueue.main.async { self.refresh() }
+        }
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -130,6 +139,11 @@ final class MainWindowModel: ObservableObject {
             guard Keychain.openAIKey != nil else { return refresh() }
         }
         Settings.engine = value
+        refresh()
+    }
+
+    func setDictationLocale(_ value: String) {
+        Settings.dictationLocale = value
         refresh()
     }
 
@@ -230,18 +244,14 @@ private struct MainView: View {
 
             Form {
                 Toggle(tr("Enabled", "Включено"), isOn: Binding(get: { model.enabled }, set: model.setEnabled))
-                Picker(tr("Transcription", "Распознавание"), selection: Binding(get: { model.engine }, set: model.setEngine)) {
-                    ForEach(Engine.allCases, id: \.self) { Text($0.title).tag($0) }
-                }
-                if model.engine == .openAI {
-                    Button(tr("OpenAI Key…", "Ключ OpenAI…"), action: model.editOpenAIKey)
-                }
-                Picker(tr("Language", "Язык"), selection: Binding(get: { model.language }, set: model.setLanguage)) {
+                Picker(tr("Interface", "Интерфейс"), selection: Binding(get: { model.language }, set: model.setLanguage)) {
                     ForEach(UILanguage.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
                 Toggle(tr("Open at login", "Запускать при входе"), isOn: Binding(get: { model.launchAtLogin }, set: model.setLaunchAtLogin))
             }
             .formStyle(.columns)
+
+            engines
 
             excludedApps
 
@@ -255,6 +265,68 @@ private struct MainView: View {
         }
         .padding(22)
         .frame(width: 480)
+    }
+
+    private var engines: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(tr("Transcription", "Распознавание")).font(.headline)
+            Text(tr(
+                "Found on this Mac — pick one. Subscriptions are used through the apps you're signed in to.",
+                "Что нашлось на этом Mac — выберите. Подписки используются через приложения, в которые вы вошли."
+            ))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            VStack(spacing: 0) {
+                ForEach(model.engines) { status in
+                    engineRow(status)
+                    if status.engine != model.engines.last?.engine { Divider() }
+                }
+            }
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .controlBackgroundColor)))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor)))
+            if model.engine == .claude || model.engine == .apple {
+                Picker(tr("I speak", "Я говорю на"), selection: Binding(get: { model.dictationLocale }, set: model.setDictationLocale)) {
+                    ForEach(AppDelegate.dictationLanguages, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                .fixedSize()
+            }
+        }
+    }
+
+    private func engineRow(_ status: EngineStatus) -> some View {
+        let selected = status.engine == model.engine
+        return HStack(spacing: 10) {
+            Image(systemName: selected ? "largecircle.fill.circle" : "circle")
+                .foregroundStyle(selected ? Color.accentColor : .secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(status.engine.title).fontWeight(selected ? .semibold : .regular)
+                    if status.isAvailable, status.engine != .openAI, status.engine != .apple {
+                        Text(tr("found", "найдено"))
+                            .font(.caption2.weight(.medium))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(.green.opacity(0.18)))
+                            .foregroundStyle(.green)
+                    }
+                }
+                Text(status.detail).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if status.engine == .openAI {
+                Button(model.hasOpenAIKey ? tr("Change Key…", "Сменить ключ…") : tr("Add Key…", "Добавить ключ…"),
+                       action: model.editOpenAIKey)
+                    .controlSize(.small)
+            }
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .contentShape(Rectangle())
+        .opacity(status.isAvailable ? 1 : 0.55)
+        .onTapGesture {
+            if status.isAvailable || status.engine == .openAI { model.setEngine(status.engine) }
+        }
     }
 
     private var excludedApps: some View {

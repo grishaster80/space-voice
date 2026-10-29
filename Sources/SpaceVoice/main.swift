@@ -7,7 +7,7 @@ if let index = CommandLine.arguments.firstIndex(of: "--transcribe"), index + 1 <
         .flatMap { CommandLine.arguments.indices.contains($0 + 1) ? Engine(rawValue: CommandLine.arguments[$0 + 1]) : nil }
     Task {
         do {
-            print(try await DebugTranscriber.transcribe(file: file, engine: engine ?? DictationController.currentEngine))
+            print(try await DebugTranscriber.transcribe(file: file, engine: engine ?? Engines.current))
             exit(0)
         } catch {
             FileHandle.standardError.write(Data("error: \(error.localizedDescription)\n".utf8))

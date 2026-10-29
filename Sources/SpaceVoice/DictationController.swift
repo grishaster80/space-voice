@@ -22,24 +22,6 @@ final class DictationController: SpaceGestureDelegate {
         recorder.onBuffer = { buffer in feed.append(buffer) }
     }
 
-    /// The engine that will be used: the chosen one, or the first that works here.
-    nonisolated static var currentEngine: Engine {
-        if let engine = Settings.engine { return engine }
-        if BBTranscription.isAvailable { return .bb }
-        if OpenAITranscription.isAvailable { return .openAI }
-        return .apple
-    }
-
-    nonisolated static func isAvailable(_ engine: Engine) -> Bool {
-        switch engine {
-        case .bb: return BBTranscription.isAvailable
-        case .openAI: return OpenAITranscription.isAvailable
-        case .apple:
-            if #available(macOS 26.0, *) { return true }
-            return false
-        }
-    }
-
     // MARK: SpaceGestureDelegate
 
     func spaceGestureShouldBegin() -> Bool {
@@ -113,7 +95,7 @@ final class DictationController: SpaceGestureDelegate {
         } catch {
             guard #available(macOS 26.0, *), !(session is AppleTranscription) else { throw error }
             hud.setText(tr("Failed, retrying on device…", "Не вышло, распознаю на устройстве…"))
-            let fallback = try await AppleTranscription(locale: Locale(identifier: Settings.appleLocale)) { _ in }
+            let fallback = try await AppleTranscription(locale: Locale(identifier: Settings.dictationLocale)) { _ in }
             if let buffer = Recorder.buffer(samples) { fallback.append(buffer) }
             return try await fallback.finish(samples: samples)
         }
@@ -152,11 +134,22 @@ final class DictationController: SpaceGestureDelegate {
     }
 
     private func makeTranscription(generation: Int) -> Task<Transcription, Error> {
-        let engine = Self.currentEngine
+        let engine = Engines.current
         let feed = feed
         return Task {
             let session: Transcription
+            let locale = Locale(identifier: Settings.dictationLocale)
+            let onPartial: @Sendable (String) -> Void = { [weak self] text in
+                Task { @MainActor in
+                    guard let self, self.generation == generation else { return }
+                    self.hud.setText(text)
+                }
+            }
             switch engine {
+            case .claude:
+                session = try ClaudeTranscription(locale: locale, onPartial: onPartial)
+            case .codex:
+                session = CodexTranscription()
             case .bb:
                 guard BBTranscription.isAvailable else {
                     throw TranscriptionError.unavailable(tr("bb not found — choose another engine", "bb не найден — выберите другое распознавание"))
@@ -171,13 +164,7 @@ final class DictationController: SpaceGestureDelegate {
                 guard #available(macOS 26.0, *) else {
                     throw TranscriptionError.unavailable(tr("Apple transcription needs macOS 26", "Распознавание Apple требует macOS 26"))
                 }
-                let locale = Locale(identifier: Settings.appleLocale)
-                session = try await AppleTranscription(locale: locale) { [weak self] text in
-                    Task { @MainActor in
-                        guard let self, self.generation == generation else { return }
-                        self.hud.setText(text)
-                    }
-                }
+                session = try await AppleTranscription(locale: locale, onPartial: onPartial)
             }
             feed.attach(session)
             return session

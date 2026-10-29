@@ -30,7 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             mainWindow.show()
         }
         // Warm up bb's location off the main thread so the first dictation is quick.
-        DispatchQueue.global(qos: .utility).async { _ = BBTranscription.isAvailable }
+        DispatchQueue.global(qos: .utility).async { BBTranscription.refreshVoiceService() }
     }
 
     /// Opening the app again (Finder, Spotlight, Dock) shows its window.
@@ -98,22 +98,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
 
         let engines = NSMenu()
-        let current = DictationController.currentEngine
-        for engine in Engine.allCases {
-            let available = DictationController.isAvailable(engine) || engine == .openAI
-            let entry = item(engine.title, available ? #selector(chooseEngine(_:)) : nil, checked: engine == current)
-            entry.representedObject = engine.rawValue
+        let current = Engines.current
+        for status in Engines.detect() {
+            let entry = item(
+                status.engine.title,
+                status.isAvailable || status.engine == .openAI ? #selector(chooseEngine(_:)) : nil,
+                checked: status.engine == current
+            )
+            entry.toolTip = status.detail
+            entry.representedObject = status.engine.rawValue
             engines.addItem(entry)
         }
         engines.addItem(.separator())
         engines.addItem(item(Keychain.openAIKey == nil ? tr("OpenAI Key…", "Ключ OpenAI…") : tr("OpenAI Key ✓…", "Ключ OpenAI ✓…"), #selector(editOpenAIKey)))
         let languages = NSMenu()
-        for (code, title) in [("ru-RU", "Русский"), ("en-US", "English")] {
-            let entry = item(title, #selector(chooseLanguage(_:)), checked: Settings.appleLocale == code)
+        for (code, title) in Self.dictationLanguages {
+            let entry = item(title, #selector(chooseLanguage(_:)), checked: Settings.dictationLocale == code)
             entry.representedObject = code
             languages.addItem(entry)
         }
-        let language = NSMenuItem(title: tr("Apple Language", "Язык Apple"), action: nil, keyEquivalent: "")
+        let language = NSMenuItem(title: tr("Dictation Language", "Язык диктовки"), action: nil, keyEquivalent: "")
         language.submenu = languages
         engines.addItem(language)
         let engineItem = NSMenuItem(title: tr("Transcription: \(current.title)", "Распознавание: \(current.title)"), action: nil, keyEquivalent: "")
@@ -130,6 +134,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(about)
         menu.addItem(item(tr("Quit", "Выйти"), #selector(NSApplication.terminate(_:)), key: "q"))
     }
+
+    /// Languages Claude and Apple can be told to expect.
+    static let dictationLanguages = [("ru-RU", "Русский"), ("en-US", "English")]
 
     private func item(_ title: String, _ action: Selector?, checked: Bool = false, key: String = "") -> NSMenuItem {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
@@ -165,7 +172,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func chooseLanguage(_ sender: NSMenuItem) {
         guard let code = sender.representedObject as? String else { return }
-        Settings.appleLocale = code
+        Settings.dictationLocale = code
     }
 
     @objc private func editOpenAIKey() {
