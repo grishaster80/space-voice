@@ -21,6 +21,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         gesture.delegate = dictation
         dictation.onRecordingChange = { [weak self] recording in self?.setIcon(recording: recording) }
 
+        let arguments = CommandLine.arguments
+        if let index = arguments.firstIndex(of: "--snapshot"), index + 1 < arguments.count {
+            mainWindow.snapshot(to: URL(fileURLWithPath: arguments[index + 1]), expanded: arguments.contains("expanded"))
+            return
+        }
         mainWindow.onRequestAccessibility = { [weak self] in self?.startGesture(prompt: false) }
         startGesture(prompt: false)
         // First launch, or something is missing: show the window rather than only a menu bar icon.

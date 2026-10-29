@@ -48,8 +48,8 @@ enum Engines {
                 ))
             }
             return EngineStatus(engine: engine, isAvailable: true, detail: tr(
-                "Your Claude subscription · signed in to Claude Code. macOS asks once to share that sign-in.",
-                "Ваша подписка Claude · вход через Claude Code. macOS один раз спросит разрешение на этот вход."
+                "Claude subscription · via Claude Code (macOS asks once)",
+                "Подписка Claude · через Claude Code (macOS спросит раз)"
             ))
         case .codex:
             guard let account = CodexAccount.credentials() else {
@@ -59,7 +59,7 @@ enum Engines {
                 ))
             }
             let plan = account.plan.map { "ChatGPT \($0.capitalized)" } ?? "ChatGPT"
-            var detail = tr("\(plan) subscription · signed in to Codex", "Подписка \(plan) · вход через Codex")
+            var detail = tr("\(plan) · via Codex", "\(plan) · через Codex")
             if account.isExpired {
                 detail += tr(" · sign-in expired, open Codex", " · вход истёк, откройте Codex")
             }
@@ -70,8 +70,8 @@ enum Engines {
             }
             let service = BBTranscription.voiceService.map { tr(" (now \($0))", " (сейчас \($0))") } ?? ""
             return EngineStatus(engine: engine, isAvailable: true, detail: tr(
-                "The voice service chosen in bb\(service)",
-                "Сервис голоса, выбранный в bb\(service)"
+                "bb's voice service\(service)",
+                "Сервис голоса bb\(service)"
             ))
         case .openAI:
             return EngineStatus(
@@ -79,7 +79,7 @@ enum Engines {
                 isAvailable: Keychain.openAIKey != nil,
                 detail: Keychain.openAIKey != nil
                     ? tr("Your key · \(Settings.openAIModel)", "Ваш ключ · \(Settings.openAIModel)")
-                    : tr("Add your own key, paid per use", "Добавьте свой ключ, оплата за использование")
+                    : tr("Your own key, paid per use", "Свой ключ, оплата за использование")
             )
         case .apple:
             let available = isAvailable(engine)
@@ -87,7 +87,7 @@ enum Engines {
                 engine: engine,
                 isAvailable: available,
                 detail: available
-                    ? tr("Offline and free · Russian has no punctuation", "Офлайн и бесплатно · русский без пунктуации")
+                    ? tr("Offline, free · no punctuation in Russian", "Офлайн, бесплатно · русский без пунктуации")
                     : tr("Needs macOS 26", "Нужна macOS 26")
             )
         }

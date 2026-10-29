@@ -35,6 +35,20 @@ final class MainWindow: NSObject, NSWindowDelegate {
         window?.makeKeyAndOrderFront(nil)
     }
 
+    /// Development: renders the window to a PNG (`SpaceVoice --snapshot <path> [expanded]`).
+    func snapshot(to url: URL, expanded: Bool) {
+        model.expandAll = expanded
+        show()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            guard let view = self.window?.contentView?.superview,
+                  let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)
+            else { exit(1) }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: url)
+            exit(0)
+        }
+    }
+
     func windowWillClose(_ notification: Notification) {
         model.stopRefreshing()
         NSApp.setActivationPolicy(.accessory)
@@ -71,6 +85,8 @@ final class MainWindowModel: ObservableObject {
     @Published var hasOpenAIKey = Keychain.openAIKey != nil
     @Published var language = Settings.uiLanguage
     @Published var excludedApps: [ExcludedApp] = []
+    /// Development: open every section (for `--snapshot`).
+    var expandAll = false
 
     var onRequestAccessibility: (() -> Void)?
     private var timer: Timer?
@@ -204,123 +220,190 @@ final class MainWindowModel: ObservableObject {
 private struct MainView: View {
     @ObservedObject var model: MainWindowModel
 
+    @State private var showEngines = false
+    @State private var showExcluded = false
+    @State private var showSettings = false
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 14) {
-                Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 56, height: 56)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Space Voice").font(.title2.bold())
-                    Text(status).foregroundStyle(ready && model.enabled ? .green : .orange)
+        VStack(alignment: .leading, spacing: 12) {
+            header
+            if !ready { permissions }
+            VStack(spacing: 0) {
+                section(tr("Transcription", "Распознавание"), value: model.engine.title, isExpanded: $showEngines) {
+                    engines
+                }
+                Divider()
+                section(tr("Turned off in", "Выключено в"), value: excludedSummary, isExpanded: $showExcluded) {
+                    excludedApps
+                }
+                Divider()
+                section(tr("Settings", "Настройки"), value: settingsSummary, isExpanded: $showSettings) {
+                    settings
                 }
             }
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(nsColor: .separatorColor)))
+        }
+        .padding(16)
+        .frame(width: 420)
+        .fixedSize(horizontal: false, vertical: true)
+        .animation(.easeOut(duration: 0.15), value: showEngines)
+        .animation(.easeOut(duration: 0.15), value: showExcluded)
+        .animation(.easeOut(duration: 0.15), value: showSettings)
+        .onAppear {
+            if model.expandAll { showEngines = true; showExcluded = true; showSettings = true }
+        }
+    }
 
-            GroupBox {
-                VStack(alignment: .leading, spacing: 10) {
-                    permission(
-                        tr("Accessibility", "Универсальный доступ"),
-                        detail: tr("to hear Space and insert text", "чтобы слышать пробел и вставлять текст"),
-                        granted: model.accessibility,
-                        action: model.grantAccessibility
-                    )
-                    Divider()
-                    permission(
-                        tr("Microphone", "Микрофон"),
-                        detail: tr("listens only while you hold Space", "слушает, только пока держите пробел"),
-                        granted: model.microphone == .authorized,
-                        action: model.grantMicrophone
-                    )
+    /// A one-line row showing the current value; click it to show the controls.
+    private func section<Content: View>(
+        _ title: String,
+        value: String,
+        isExpanded: Binding<Bool>,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
+                    .frame(width: 12)
+                Text(title)
+                Spacer(minLength: 8)
+                Text(value).foregroundStyle(.secondary).lineLimit(1)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+            .onTapGesture { isExpanded.wrappedValue.toggle() }
+            if isExpanded.wrappedValue {
+                content()
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 10)
+            }
+        }
+    }
+
+    private var excludedSummary: String {
+        model.excludedApps.isEmpty
+            ? tr("none", "нигде")
+            : model.excludedApps.map(\.name).joined(separator: ", ")
+    }
+
+    private var settingsSummary: String {
+        var parts = [model.language == .system ? tr("System language", "Язык системы") : model.language.title]
+        if model.launchAtLogin { parts.append(tr("opens at login", "при входе")) }
+        return parts.joined(separator: " · ")
+    }
+
+    // MARK: Header
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 40, height: 40)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Space Voice").font(.title3.bold())
+                    Text(status).font(.callout).foregroundStyle(ready && model.enabled ? .green : .orange)
                 }
-                .padding(6)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text(tr("How to use", "Как пользоваться")).font(.headline)
-                Text(LocalizedStringKey(tr(
-                    "Put the cursor in any text field, **tap Space**, then **press and hold Space** and talk. Release it and the text is inserted. `Esc` cancels.",
-                    "Поставьте курсор в любое поле, **тапните пробел**, затем **зажмите пробел** и говорите. Отпустите — текст вставится. `Esc` — отменить."
-                )))
-                .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Form {
+                .fixedSize()
+                Spacer(minLength: 12)
                 Toggle(tr("Enabled", "Включено"), isOn: Binding(get: { model.enabled }, set: model.setEnabled))
-                Picker(tr("Interface", "Интерфейс"), selection: Binding(get: { model.language }, set: model.setLanguage)) {
-                    ForEach(UILanguage.allCases, id: \.self) { Text($0.title).tag($0) }
-                }
-                Toggle(tr("Open at login", "Запускать при входе"), isOn: Binding(get: { model.launchAtLogin }, set: model.setLaunchAtLogin))
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                    .help(tr("Turn Space Voice on or off", "Включить или выключить Space Voice"))
             }
-            .formStyle(.columns)
-
-            engines
-
-            excludedApps
-
-            Text(tr(
-                "More options are in the microphone icon in the menu bar. If the notch hides it, just open the app again.",
-                "Остальное — в иконке микрофона в строке меню. Если её не видно за вырезом экрана, просто откройте приложение снова."
-            ))
-            .font(.footnote)
+            Text(LocalizedStringKey(tr(
+                "**Tap Space**, then **hold Space** and talk. Release to insert, `Esc` cancels.",
+                "**Тапните пробел**, затем **зажмите** и говорите. Отпустите — вставится, `Esc` — отмена."
+            )))
+            .font(.callout)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(22)
-        .frame(width: 480)
     }
 
+    private var permissions: some View {
+        HStack(spacing: 16) {
+            permission(tr("Accessibility", "Универсальный доступ"), granted: model.accessibility,
+                       help: tr("To hear Space and insert text", "Чтобы слышать пробел и вставлять текст"),
+                       action: model.grantAccessibility)
+            permission(tr("Microphone", "Микрофон"), granted: model.microphone == .authorized,
+                       help: tr("Listens only while you hold Space", "Слушает, только пока держите пробел"),
+                       action: model.grantMicrophone)
+            Spacer()
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(.orange.opacity(0.12)))
+    }
+
+    private func permission(_ title: String, granted: Bool, help: String, action: @escaping () -> Void) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: granted ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                .foregroundStyle(granted ? .green : .orange)
+            Text(title)
+            if !granted { Button(tr("Allow…", "Разрешить…"), action: action).controlSize(.small) }
+        }
+        .help(help)
+    }
+
+    private var ready: Bool { model.accessibility && model.microphone == .authorized }
+
+    private var status: String {
+        if !ready { return tr("Needs permissions", "Нужны разрешения") }
+        return model.enabled ? tr("Ready", "Готово") : tr("Turned off", "Выключено")
+    }
+
+    // MARK: Transcription
+
     private var engines: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(tr("Transcription", "Распознавание")).font(.headline)
-            Text(tr(
-                "Found on this Mac — pick one. Subscriptions are used through the apps you're signed in to.",
-                "Что нашлось на этом Mac — выберите. Подписки используются через приложения, в которые вы вошли."
-            ))
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 6) {
             VStack(spacing: 0) {
                 ForEach(model.engines) { status in
                     engineRow(status)
-                    if status.engine != model.engines.last?.engine { Divider() }
+                    if status.engine != model.engines.last?.engine { Divider().padding(.leading, 30) }
                 }
             }
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .controlBackgroundColor)))
             .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor)))
             if model.engine == .claude || model.engine == .apple {
-                Picker(tr("I speak", "Я говорю на"), selection: Binding(get: { model.dictationLocale }, set: model.setDictationLocale)) {
-                    ForEach(AppDelegate.dictationLanguages, id: \.0) { Text($0.1).tag($0.0) }
+                HStack {
+                    Text(tr("I speak", "Я говорю")).foregroundStyle(.secondary)
+                    Picker("", selection: Binding(get: { model.dictationLocale }, set: model.setDictationLocale)) {
+                        ForEach(AppDelegate.dictationLanguages, id: \.0) { Text($0.1).tag($0.0) }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
                 }
-                .fixedSize()
+                .controlSize(.small)
             }
         }
     }
 
     private func engineRow(_ status: EngineStatus) -> some View {
         let selected = status.engine == model.engine
-        return HStack(spacing: 10) {
+        return HStack(spacing: 8) {
             Image(systemName: selected ? "largecircle.fill.circle" : "circle")
                 .foregroundStyle(selected ? Color.accentColor : .secondary)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 5) {
                     Text(status.engine.title).fontWeight(selected ? .semibold : .regular)
                     if status.isAvailable, status.engine != .openAI, status.engine != .apple {
-                        Text(tr("found", "найдено"))
-                            .font(.caption2.weight(.medium))
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(Capsule().fill(.green.opacity(0.18)))
-                            .foregroundStyle(.green)
+                        Image(systemName: "checkmark.seal.fill").font(.caption).foregroundStyle(.green)
+                            .help(tr("Found on this Mac", "Найдено на этом Mac"))
                     }
                 }
-                Text(status.detail).font(.caption).foregroundStyle(.secondary)
+                Text(status.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
-            Spacer()
+            .help(status.detail)
+            Spacer(minLength: 4)
             if status.engine == .openAI {
-                Button(model.hasOpenAIKey ? tr("Change Key…", "Сменить ключ…") : tr("Add Key…", "Добавить ключ…"),
+                Button(model.hasOpenAIKey ? tr("Change…", "Сменить…") : tr("Add Key…", "Добавить…"),
                        action: model.editOpenAIKey)
                     .controlSize(.small)
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 5)
         .padding(.horizontal, 8)
         .contentShape(Rectangle())
         .opacity(status.isAvailable ? 1 : 0.55)
@@ -329,12 +412,35 @@ private struct MainView: View {
         }
     }
 
+    // MARK: Settings
+
+    private var settings: some View {
+        Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 8) {
+            GridRow {
+                Text(tr("Interface", "Интерфейс")).foregroundStyle(.secondary)
+                Picker("", selection: Binding(get: { model.language }, set: model.setLanguage)) {
+                    ForEach(UILanguage.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .labelsHidden()
+            }
+            GridRow {
+                Color.clear.frame(width: 0, height: 0)
+                Toggle(tr("Open at login", "Запускать при входе"),
+                       isOn: Binding(get: { model.launchAtLogin }, set: model.setLaunchAtLogin))
+            }
+        }
+        .controlSize(.small)
+    }
+
+    // MARK: Excluded apps
+
     private var excludedApps: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(tr("Turned off in", "Выключено в")).font(.headline)
+                Text(tr("The Space gesture does nothing in these apps.", "В этих приложениях жест пробела не работает."))
+                    .font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Menu(tr("Add App", "Добавить")) {
+                Menu {
                     ForEach(model.runningApps) { app in
                         Button {
                             model.exclude(app.id)
@@ -344,22 +450,21 @@ private struct MainView: View {
                     }
                     Divider()
                     Button(tr("Choose…", "Выбрать…"), action: model.chooseAppToExclude)
+                } label: {
+                    Text(tr("Add App", "Добавить"))
                 }
+                .controlSize(.small)
                 .fixedSize()
             }
             if model.excludedApps.isEmpty {
                 Text(tr("Works in every app.", "Работает во всех приложениях."))
-                    .foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(.secondary)
             } else {
                 VStack(spacing: 0) {
                     ForEach(model.excludedApps) { app in
-                        HStack {
-                            Image(nsImage: app.icon).resizable().frame(width: 20, height: 20)
-                            Text(app.name)
-                            if app.id == Settings.bbDesktop {
-                                Text(tr("has its own Space Voice", "там свой Space Voice"))
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
+                        HStack(spacing: 6) {
+                            Image(nsImage: app.icon).resizable().frame(width: 16, height: 16)
+                            Text(app.name).lineLimit(1)
                             Spacer()
                             Button {
                                 model.include(app.id)
@@ -369,36 +474,15 @@ private struct MainView: View {
                             .buttonStyle(.plain)
                             .help(tr("Turn back on", "Включить обратно"))
                         }
-                        .padding(.vertical, 5)
+                        .padding(.vertical, 4)
                         .padding(.horizontal, 8)
+                        .help(app.id == Settings.bbDesktop ? tr("bb has its own Space Voice", "В bb свой Space Voice") : app.name)
                         if app.id != model.excludedApps.last?.id { Divider() }
                     }
                 }
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .controlBackgroundColor)))
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor)))
             }
-        }
-    }
-
-    private var ready: Bool { model.accessibility && model.microphone == .authorized }
-
-    private var status: String {
-        if !ready { return tr("Needs the permissions below", "Нужны разрешения ниже") }
-        return model.enabled
-            ? tr("Ready — works in any text field", "Готово — работает в любом поле")
-            : tr("Turned off", "Выключено")
-    }
-
-    private func permission(_ title: String, detail: String, granted: Bool, action: @escaping () -> Void) -> some View {
-        HStack {
-            Image(systemName: granted ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                .foregroundStyle(granted ? .green : .orange)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                Text(detail).font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            if !granted { Button(tr("Allow…", "Разрешить…"), action: action) }
         }
     }
 }
