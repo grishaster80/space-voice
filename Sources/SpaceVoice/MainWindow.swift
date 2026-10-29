@@ -50,6 +50,8 @@ final class MainWindow: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        // Opening the app again starts from a fresh window, with Transcription expanded.
+        window = nil
         model.stopRefreshing()
         NSApp.setActivationPolicy(.accessory)
     }
@@ -220,7 +222,7 @@ final class MainWindowModel: ObservableObject {
 private struct MainView: View {
     @ObservedObject var model: MainWindowModel
 
-    @State private var showEngines = false
+    @State private var showEngines = true
     @State private var showExcluded = false
     @State private var showSettings = false
 
