@@ -76,6 +76,16 @@ final class Recorder: @unchecked Sendable {
         onBuffer?(output)
     }
 
+    /// `samples` as one buffer in `Recorder.format`.
+    static func buffer(_ samples: [Float]) -> AVAudioPCMBuffer? {
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)),
+              let channel = buffer.floatChannelData?[0]
+        else { return nil }
+        samples.withUnsafeBufferPointer { channel.update(from: $0.baseAddress!, count: samples.count) }
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+        return buffer
+    }
+
     /// 16-bit PCM WAV of `samples` at `Recorder.format`'s rate.
     static func wav(_ samples: [Float]) -> Data {
         let rate = UInt32(format.sampleRate)
@@ -106,5 +116,5 @@ final class Recorder: @unchecked Sendable {
 enum RecorderError: LocalizedError {
     case noMicrophone
 
-    var errorDescription: String? { "Микрофон не найден" }
+    var errorDescription: String? { tr("No microphone found", "Микрофон не найден") }
 }

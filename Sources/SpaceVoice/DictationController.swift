@@ -62,8 +62,8 @@ final class DictationController: SpaceGestureDelegate {
         }
         guard recorder.isRunning else {
             hud.show(.failed(AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
-                ? "Не удалось включить микрофон"
-                : "Нет доступа к микрофону"))
+                ? tr("Couldn't start the microphone", "Не удалось включить микрофон")
+                : tr("No microphone access", "Нет доступа к микрофону")))
             return
         }
         if Settings.sounds { NSSound(named: "Tink")?.play() }
@@ -89,17 +89,42 @@ final class DictationController: SpaceGestureDelegate {
         hud.show(.transcribing)
         Task {
             do {
-                let session = try await transcription.value
-                let text = try await session.finish(samples: samples)
+                let text = try await transcribe(samples, with: transcription)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 if current == generation { hud.hide() }
                 if !text.isEmpty { TextInserter.insert(text) }
             } catch is CancellationError {
                 if current == generation { hud.hide() }
             } catch {
+                Self.saveFailedRecording(samples)
                 if current == generation { hud.show(.failed(error.localizedDescription)) }
             }
         }
+    }
+
+    /// The transcript from the chosen engine, or from Apple's on-device model when
+    /// that engine fails, so a dictation is not lost to a network or service error.
+    private func transcribe(_ samples: [Float], with transcription: Task<Transcription, Error>) async throws -> String {
+        let session = try await transcription.value
+        do {
+            return try await session.finish(samples: samples)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            guard #available(macOS 26.0, *), !(session is AppleTranscription) else { throw error }
+            hud.setText(tr("Failed, retrying on device…", "Не вышло, распознаю на устройстве…"))
+            let fallback = try await AppleTranscription(locale: Locale(identifier: Settings.appleLocale)) { _ in }
+            if let buffer = Recorder.buffer(samples) { fallback.append(buffer) }
+            return try await fallback.finish(samples: samples)
+        }
+    }
+
+    /// Keeps the last recording that could not be transcribed, to retry or debug it.
+    private static func saveFailedRecording(_ samples: [Float]) {
+        let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("io.github.grishaster80.spacevoice")
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try? Recorder.wav(samples).write(to: directory.appendingPathComponent("last-failed.wav"))
     }
 
     func spaceGestureDidCancelRecording() {
@@ -134,17 +159,17 @@ final class DictationController: SpaceGestureDelegate {
             switch engine {
             case .bb:
                 guard BBTranscription.isAvailable else {
-                    throw TranscriptionError.unavailable("bb не найден — выберите другое распознавание")
+                    throw TranscriptionError.unavailable(tr("bb not found — choose another engine", "bb не найден — выберите другое распознавание"))
                 }
                 session = BBTranscription()
             case .openAI:
                 guard OpenAITranscription.isAvailable else {
-                    throw TranscriptionError.unavailable("Добавьте ключ OpenAI в меню Space Voice")
+                    throw TranscriptionError.unavailable(tr("Add an OpenAI key in Space Voice", "Добавьте ключ OpenAI в Space Voice"))
                 }
                 session = OpenAITranscription()
             case .apple:
                 guard #available(macOS 26.0, *) else {
-                    throw TranscriptionError.unavailable("Распознавание Apple требует macOS 26")
+                    throw TranscriptionError.unavailable(tr("Apple transcription needs macOS 26", "Распознавание Apple требует macOS 26"))
                 }
                 let locale = Locale(identifier: Settings.appleLocale)
                 session = try await AppleTranscription(locale: locale) { [weak self] text in

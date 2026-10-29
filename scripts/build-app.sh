@@ -24,6 +24,7 @@ ICONSET="build/AppIcon.iconset"
 rm -rf "$ICONSET"
 swift scripts/make-icon.swift "$ICONSET"
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+cp -R Resources/ru.lproj "$APP/Contents/Resources/"
 
 if [ -z "${SIGN_IDENTITY:-}" ]; then
   SIGN_IDENTITY="$(security find-identity -v -p codesigning | sed -n 's/.*"\(Apple Development: .*\)"/\1/p' | head -1)"

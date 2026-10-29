@@ -68,17 +68,27 @@ final class BBTranscription: Transcription, @unchecked Sendable {
 
     func finish(samples: [Float]) async throws -> String {
         guard let location = Self.location else {
-            throw TranscriptionError.unavailable("bb не найден")
+            throw TranscriptionError.unavailable(tr("bb not found", "bb не найден"))
         }
         let file = FileManager.default.temporaryDirectory
             .appendingPathComponent("spacevoice-\(UUID().uuidString).wav")
         try Recorder.wav(samples).write(to: file)
         defer { try? FileManager.default.removeItem(at: file) }
+        // The voice service (Codex) sometimes fails a request outright; one retry usually does it.
+        do {
+            return try await run(location, file: file)
+        } catch TranscriptionError.failed {
+            return try await run(location, file: file)
+        }
+    }
 
+    private func run(_ location: Location, file: URL) async throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: location.executable)
         process.arguments = ["voice", "transcribe", "--type", "audio/wav", "--json", file.path]
-        var environment = ProcessInfo.processInfo.environment
+        // Always ask this Mac's bb, however the app was started: drop a launching
+        // bb thread's context (BB_SERVER_URL, BB_CLI, …).
+        var environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("BB_") }
         environment["PATH"] = location.path
         process.environment = environment
         let output = Pipe()
@@ -99,9 +109,11 @@ final class BBTranscription: Transcription, @unchecked Sendable {
                           let response = try? JSONDecoder().decode(Response.self, from: data) {
                     continuation.resume(returning: response.text)
                 } else {
-                    let message = error.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let message = error.split(separator: "\n")
+                        .map { $0.trimmingCharacters(in: .whitespaces) }
+                        .first { !$0.isEmpty }
                     continuation.resume(throwing: TranscriptionError.failed(
-                        message.isEmpty ? "bb voice transcribe: код \(process.terminationStatus)" : message
+                        "bb: " + (message ?? "exit \(process.terminationStatus)")
                     ))
                 }
             }
@@ -130,7 +142,7 @@ final class OpenAITranscription: Transcription, @unchecked Sendable {
 
     func finish(samples: [Float]) async throws -> String {
         guard let key = Keychain.openAIKey else {
-            throw TranscriptionError.unavailable("Нет ключа OpenAI")
+            throw TranscriptionError.unavailable(tr("No OpenAI key", "Нет ключа OpenAI"))
         }
         let model = Settings.openAIModel
         let task = Task {
@@ -187,7 +199,7 @@ final class AppleTranscription: Transcription, @unchecked Sendable {
     /// Prepares the model (downloading it the first time) and starts listening.
     init(locale: Locale, onPartial: @escaping @Sendable (String) -> Void) async throws {
         guard let supported = await DictationTranscriber.supportedLocale(equivalentTo: locale) else {
-            throw TranscriptionError.unavailable("Apple не распознаёт язык \(locale.identifier)")
+            throw TranscriptionError.unavailable(tr("Apple can't recognize \(locale.identifier)", "Apple не распознаёт язык \(locale.identifier)"))
         }
         transcriber = DictationTranscriber(
             locale: supported,

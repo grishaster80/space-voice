@@ -6,11 +6,11 @@ enum DebugTranscriber {
         let audio = try AVAudioFile(forReading: file)
         guard let input = AVAudioPCMBuffer(pcmFormat: audio.processingFormat, frameCapacity: AVAudioFrameCount(audio.length)),
               let converter = AVAudioConverter(from: audio.processingFormat, to: Recorder.format)
-        else { throw TranscriptionError.failed("Не удалось прочитать \(file.path)") }
+        else { throw TranscriptionError.failed("Can't read \(file.path)") }
         try audio.read(into: input)
         let capacity = AVAudioFrameCount(Double(input.frameLength) * Recorder.format.sampleRate / audio.processingFormat.sampleRate) + 64
         guard let buffer = AVAudioPCMBuffer(pcmFormat: Recorder.format, frameCapacity: capacity) else {
-            throw TranscriptionError.failed("Нет памяти")
+            throw TranscriptionError.failed("Out of memory")
         }
         var consumed = false
         var error: NSError?

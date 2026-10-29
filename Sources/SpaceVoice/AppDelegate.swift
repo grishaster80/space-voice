@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var permissionTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Settings.migrate()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         setIcon(recording: false)
         let menu = NSMenu()
@@ -71,26 +72,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
 
-        let hint = NSMenuItem(title: "Тапните пробел, затем зажмите пробел и говорите", action: nil, keyEquivalent: "")
+        let hint = NSMenuItem(title: tr("Tap Space, then hold Space and talk", "Тапните пробел, затем зажмите пробел и говорите"), action: nil, keyEquivalent: "")
         hint.isEnabled = false
         menu.addItem(hint)
-        menu.addItem(item("Открыть Space Voice…", #selector(openMainWindow)))
+        menu.addItem(item(tr("Open Space Voice…", "Открыть Space Voice…"), #selector(openMainWindow)))
         menu.addItem(.separator())
 
         if !AXIsProcessTrusted() || !gesture.isRunning {
-            menu.addItem(item("⚠️ Дать доступ к Универсальному доступу…", #selector(openAccessibility)))
+            menu.addItem(item(tr("⚠️ Allow Accessibility…", "⚠️ Дать доступ к Универсальному доступу…"), #selector(openAccessibility)))
         }
         if AVCaptureDevice.authorizationStatus(for: .audio) == .denied {
-            menu.addItem(item("⚠️ Дать доступ к микрофону…", #selector(openMicrophone)))
+            menu.addItem(item(tr("⚠️ Allow Microphone…", "⚠️ Дать доступ к микрофону…"), #selector(openMicrophone)))
         }
 
-        menu.addItem(item("Включено", #selector(toggleEnabled), checked: Settings.enabled))
+        menu.addItem(item(tr("Enabled", "Включено"), #selector(toggleEnabled), checked: Settings.enabled))
 
         if let app = NSWorkspace.shared.frontmostApplication, let id = app.bundleIdentifier,
            id != Bundle.main.bundleIdentifier {
             let name = app.localizedName ?? id
             let excluded = Settings.excludedApps.contains(id)
-            let toggle = item("Выключить в «\(name)»", #selector(toggleExcluded(_:)), checked: excluded)
+            let toggle = item(tr("Turn Off in “\(name)”", "Выключить в «\(name)»"), #selector(toggleExcluded(_:)), checked: excluded)
             toggle.representedObject = id
             menu.addItem(toggle)
         }
@@ -105,29 +106,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             engines.addItem(entry)
         }
         engines.addItem(.separator())
-        engines.addItem(item(Keychain.openAIKey == nil ? "Ключ OpenAI…" : "Ключ OpenAI ✓…", #selector(editOpenAIKey)))
+        engines.addItem(item(Keychain.openAIKey == nil ? tr("OpenAI Key…", "Ключ OpenAI…") : tr("OpenAI Key ✓…", "Ключ OpenAI ✓…"), #selector(editOpenAIKey)))
         let languages = NSMenu()
         for (code, title) in [("ru-RU", "Русский"), ("en-US", "English")] {
             let entry = item(title, #selector(chooseLanguage(_:)), checked: Settings.appleLocale == code)
             entry.representedObject = code
             languages.addItem(entry)
         }
-        let language = NSMenuItem(title: "Язык Apple", action: nil, keyEquivalent: "")
+        let language = NSMenuItem(title: tr("Apple Language", "Язык Apple"), action: nil, keyEquivalent: "")
         language.submenu = languages
         engines.addItem(language)
-        let engineItem = NSMenuItem(title: "Распознавание: \(current.title)", action: nil, keyEquivalent: "")
+        let engineItem = NSMenuItem(title: tr("Transcription: \(current.title)", "Распознавание: \(current.title)"), action: nil, keyEquivalent: "")
         engineItem.submenu = engines
         menu.addItem(engineItem)
 
-        menu.addItem(item("Звуки", #selector(toggleSounds), checked: Settings.sounds))
-        menu.addItem(item("Запускать при входе", #selector(toggleLogin), checked: SMAppService.mainApp.status == .enabled))
+        menu.addItem(item(tr("Sounds", "Звуки"), #selector(toggleSounds), checked: Settings.sounds))
+        menu.addItem(item(tr("Open at Login", "Запускать при входе"), #selector(toggleLogin), checked: SMAppService.mainApp.status == .enabled))
         menu.addItem(.separator())
 
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
         let about = NSMenuItem(title: "Space Voice \(version)", action: nil, keyEquivalent: "")
         about.isEnabled = false
         menu.addItem(about)
-        menu.addItem(item("Выйти", #selector(NSApplication.terminate(_:)), key: "q"))
+        menu.addItem(item(tr("Quit", "Выйти"), #selector(NSApplication.terminate(_:)), key: "q"))
     }
 
     private func item(_ title: String, _ action: Selector?, checked: Bool = false, key: String = "") -> NSMenuItem {
@@ -168,20 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func editOpenAIKey() {
-        let alert = NSAlert()
-        alert.messageText = "Ключ OpenAI API"
-        alert.informativeText = "Хранится в связке ключей. Модель: \(Settings.openAIModel). Оставьте пустым, чтобы удалить."
-        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
-        field.placeholderString = "sk-…"
-        alert.accessoryView = field
-        alert.addButton(withTitle: "Сохранить")
-        alert.addButton(withTitle: "Отмена")
-        NSApp.activate(ignoringOtherApps: true)
-        alert.window.initialFirstResponder = field
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let key = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        Keychain.openAIKey = key.isEmpty ? nil : key
-        if key.isEmpty, Settings.engine == .openAI { Settings.engine = nil }
+        OpenAIKeyPrompt.run()
     }
 
     @objc private func toggleSounds() {

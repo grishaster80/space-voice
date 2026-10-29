@@ -3,9 +3,14 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleDevelopmentRegion</key>
-    <string>ru</string>
+    <string>en</string>
     <key>CFBundleExecutable</key>
     <string>SpaceVoice</string>
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>en</string>
+        <string>ru</string>
+    </array>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
@@ -29,8 +34,8 @@
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Space Voice слушает микрофон, только пока вы держите пробел, чтобы распознать речь.</string>
+    <string>Space Voice listens to the microphone only while you hold Space, to turn your speech into text.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
-    <string>Space Voice превращает надиктованную речь в текст.</string>
+    <string>Space Voice turns your dictation into text.</string>
 </dict>
 </plist>

@@ -1,0 +1,2 @@
+"NSMicrophoneUsageDescription" = "Space Voice слушает микрофон, только пока вы держите пробел, чтобы распознать речь.";
+"NSSpeechRecognitionUsageDescription" = "Space Voice превращает надиктованную речь в текст.";

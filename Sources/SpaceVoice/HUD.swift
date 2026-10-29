@@ -94,8 +94,8 @@ private struct HUDView: View {
 
     private var label: String {
         switch model.phase {
-        case .listening: return model.text.isEmpty ? "Говорите… отпустите пробел" : model.text
-        case .transcribing: return model.text.isEmpty ? "Распознаю…" : model.text
+        case .listening: return model.text.isEmpty ? tr("Speak… release Space to insert", "Говорите… отпустите пробел") : model.text
+        case .transcribing: return model.text.isEmpty ? tr("Transcribing…", "Распознаю…") : model.text
         case .failed(let message): return message
         }
     }
