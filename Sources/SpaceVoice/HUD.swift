@@ -62,6 +62,21 @@ final class HUD {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
+    /// Development: renders the pill to a PNG (`SpaceVoice --snapshot-hud <path> [text]`).
+    func snapshot(to url: URL, text: String) {
+        show(.listening)
+        setText(text)
+        model.level = 0.7
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            guard let view = self.panel.contentView,
+                  let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)
+            else { exit(1) }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: url)
+            exit(0)
+        }
+    }
+
     /// Bottom centre of the screen with the pointer, above the Dock.
     private func position() {
         let mouse = NSEvent.mouseLocation

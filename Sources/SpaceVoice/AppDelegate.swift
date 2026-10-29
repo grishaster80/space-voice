@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let gesture = SpaceGesture()
     private let dictation = DictationController()
     private let mainWindow = MainWindow()
+    private lazy var snapshotHUD = HUD()
     private var statusItem: NSStatusItem!
     private var permissionTimer: Timer?
 
@@ -24,6 +25,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let arguments = CommandLine.arguments
         if let index = arguments.firstIndex(of: "--snapshot"), index + 1 < arguments.count {
             mainWindow.snapshot(to: URL(fileURLWithPath: arguments[index + 1]), expanded: arguments.contains("expanded"))
+            return
+        }
+        if let index = arguments.firstIndex(of: "--snapshot-hud"), index + 1 < arguments.count {
+            snapshotHUD.snapshot(
+                to: URL(fileURLWithPath: arguments[index + 1]),
+                text: index + 2 < arguments.count ? arguments[index + 2] : ""
+            )
             return
         }
         mainWindow.onRequestAccessibility = { [weak self] in self?.startGesture(prompt: false) }

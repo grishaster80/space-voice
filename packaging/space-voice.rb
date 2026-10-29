@@ -2,10 +2,10 @@ cask "space-voice" do
   version "__VERSION__"
   sha256 "__SHA256__"
 
-  url "https://github.com/__TAP_REPO__/releases/download/space-voice-v#{version}/SpaceVoice-#{version}.zip"
+  url "https://github.com/__REPO__/releases/download/v#{version}/SpaceVoice-#{version}.zip"
   name "Space Voice"
   desc "Tap Space, then hold Space in any text field to dictate"
-  homepage "https://github.com/__TAP_REPO__"
+  homepage "https://github.com/__REPO__"
 
   depends_on macos: ">= :sonoma"
 
