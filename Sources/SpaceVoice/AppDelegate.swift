@@ -6,6 +6,7 @@ import ServiceManagement
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let gesture = SpaceGesture()
     private let dictation = DictationController()
+    private let mainWindow = MainWindow()
     private var statusItem: NSStatusItem!
     private var permissionTimer: Timer?
 
@@ -19,12 +20,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         gesture.delegate = dictation
         dictation.onRecordingChange = { [weak self] recording in self?.setIcon(recording: recording) }
 
-        if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
-            AVCaptureDevice.requestAccess(for: .audio) { _ in }
+        mainWindow.onRequestAccessibility = { [weak self] in self?.startGesture(prompt: false) }
+        startGesture(prompt: false)
+        // First launch, or something is missing: show the window rather than only a menu bar icon.
+        let microphoneReady = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+        if !UserDefaults.standard.bool(forKey: "launchedBefore") || !AXIsProcessTrusted() || !microphoneReady {
+            UserDefaults.standard.set(true, forKey: "launchedBefore")
+            mainWindow.show()
         }
-        startGesture(prompt: true)
         // Warm up bb's location off the main thread so the first dictation is quick.
         DispatchQueue.global(qos: .utility).async { _ = BBTranscription.isAvailable }
+    }
+
+    /// Opening the app again (Finder, Spotlight, Dock) shows its window.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        mainWindow.show()
+        return true
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
     }
 
     /// Installs the Space tap once the Accessibility permission is granted.
@@ -59,6 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let hint = NSMenuItem(title: "Тапните пробел, затем зажмите пробел и говорите", action: nil, keyEquivalent: "")
         hint.isEnabled = false
         menu.addItem(hint)
+        menu.addItem(item("Открыть Space Voice…", #selector(openMainWindow)))
         menu.addItem(.separator())
 
         if !AXIsProcessTrusted() || !gesture.isRunning {
@@ -119,6 +135,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         item.target = action == #selector(NSApplication.terminate(_:)) ? NSApp : self
         item.state = checked ? .on : .off
         return item
+    }
+
+    @objc private func openMainWindow() {
+        mainWindow.show()
     }
 
     @objc private func toggleEnabled() {
