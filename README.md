@@ -4,6 +4,8 @@
 
 [Русский](README.ru.md) · [MIT license](LICENSE)
 
+![Tap Space, hold Space, speak — voice input in any Mac text field](docs/screenshots/cover.jpg)
+
 Space Voice is a small menu bar app for macOS. It brings the "tap Space, then hold Space" dictation
 gesture from [bb](https://getbb.app) to every app: browsers, chats, editors, terminals.
 Release Space and what you said is typed where your cursor is.
