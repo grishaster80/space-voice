@@ -4,3 +4,18 @@ dist/
 .DS_Store
 *.xcodeproj/
 .swiftpm/
+
+# Local credentials, signing material and private recordings
+.env
+.env.*
+!.env.example
+auth.json
+credentials.json
+*.keychain
+*.keychain-db
+*.p12
+*.pfx
+*.pem
+*.key
+*.wav
+*.m4a

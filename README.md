@@ -1,12 +1,15 @@
 # Space Voice
 
-**Dictate into any text field on your Mac: tap Space, then hold Space and talk.**
+**Your voice, in any Mac text field. Tap Space, hold Space, speak.**
+
+[Русский](README.ru.md) · [MIT license](LICENSE)
 
 Space Voice is a small menu bar app for macOS. It brings the "tap Space, then hold Space" dictation
 gesture from [bb](https://getbb.app) to every app: browsers, chats, editors, terminals.
 Release Space and what you said is typed where your cursor is.
 
-It transcribes with services you already have: your **Claude** or **ChatGPT (Codex)** subscription,
+Bring your own AI subscription or stay entirely on device. Space Voice transcribes with services
+you already have: your **Claude** or **ChatGPT (Codex)** subscription,
 **bb**, your own **OpenAI API key**, or **Apple's on-device model**, which works offline.
 
 <p align="center">
@@ -38,23 +41,9 @@ Typing doesn't change:
 
 Requires **macOS 14 Sonoma** or later. Apple's on-device engine needs **macOS 26**.
 
-### Homebrew
-
-```bash
-brew install --cask grishaster80/tap/space-voice
-```
-
-### Download
-
-Get `SpaceVoice-<version>.zip` from [Releases](../../releases), unzip it and move **SpaceVoice.app** to
-`/Applications`. The app isn't notarized yet, so the first time, right-click it and choose **Open**,
-or run:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/SpaceVoice.app
-```
-
 ### Build from source
+
+The initial open-source release is source-only. There are no published app downloads or Homebrew cask yet.
 
 ```bash
 git clone https://github.com/grishaster80/space-voice.git
@@ -90,24 +79,26 @@ If you don't pick, Space Voice uses the first available of Codex, bb, OpenAI and
 | Engine | What it uses | Notes |
 | --- | --- | --- |
 | **Claude** | Your Claude subscription, through the claude.ai sign-in of [Claude Code](https://claude.com/claude-code) | Streams, so words appear while you talk. Set the language you speak in the app. macOS asks once to let Space Voice read Claude Code's keychain item. |
-| **Codex (ChatGPT)** | Your ChatGPT plan, through the sign-in of the [Codex CLI](https://github.com/openai/codex) (`~/.codex/auth.json`) | Fast (about 1 s), detects the language, handles mixed languages and technical terms well. |
+| **Codex (ChatGPT)** | Your ChatGPT plan, through the sign-in of the [Codex CLI](https://github.com/openai/codex) (`~/.codex/auth.json`) | Detects the language; supports mixed-language dictation and technical terms. |
 | **bb** | `bb voice transcribe`: the voice service chosen in bb | Shows which service bb uses now (Codex or bb cloud). |
-| **OpenAI API key** | Your own key, `gpt-4o-transcribe` | Paid per use. The key is kept in your login keychain. |
+| **OpenAI API key** | `gpt-4o-transcribe`, using your own credentials | Paid per use. The key is kept in your login keychain. |
 | **Apple, on device** | Apple's dictation model (`SpeechAnalyzer`, macOS 26) | Offline and free. Downloads the language model on first use. No punctuation in Russian. |
 
-If an online engine fails, for example because of a network error, Space Voice transcribes the same
-recording with Apple's on-device model, so your words aren't lost.
+On macOS 26, if an online transcription fails after the session starts, Space Voice tries the same
+recording with Apple's on-device model. This requires the selected language to be supported and its model available.
 
 > **Note on Claude and Codex.** These engines call the services Claude Code's voice mode and Codex
 > use, with the sign-ins those apps already keep on your Mac. They aren't public APIs, so they can
-> change without notice. Space Voice reads the sign-ins locally, sends them only to Anthropic or
-> OpenAI, and never stores or copies them. When a sign-in expires, open Claude Code or Codex once
-> to renew it.
+> change without notice. Space Voice reads the sign-ins locally and authenticates directly with
+> the corresponding provider, without saving a separate copy. Availability depends on your account
+> and provider limits. This is not an official integration or a promise of unlimited transcription.
+> When a sign-in expires, open Claude Code or Codex once to renew it.
 
 ## Privacy
 
 - Audio is recorded only while you hold Space, and goes only to the engine you chose. With
-  Apple's engine it never leaves your Mac.
+  Apple's engine recognition runs on your Mac; language assets may need an initial download.
+  With bb, audio is handled by the voice service configured in bb.
 - No analytics, telemetry or servers of its own.
 - No keys are built into the app. Your OpenAI key, if you add one, is stored in your login keychain.
 - If a transcription fails completely, the last recording is kept at
@@ -162,3 +153,12 @@ scripts/release.sh 0.2.0
 
 This builds and signs the app, uploads `SpaceVoice-0.2.0.zip` to this repository's Releases, and
 updates `Casks/space-voice.rb` in [grishaster80/homebrew-tap](https://github.com/grishaster80/homebrew-tap).
+
+## Contributing
+
+Issues and pull requests are welcome. Include your macOS version, selected engine and steps to reproduce.
+Never attach sign-in files, tokens or private audio. See [SECURITY.md](SECURITY.md) for security reports.
+
+## License
+
+[MIT](LICENSE).
